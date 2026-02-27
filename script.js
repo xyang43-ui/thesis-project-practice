@@ -6,15 +6,20 @@ window.addEventListener('DOMContentLoaded', () => {
 
     if (!camera || !viewport) return;
 
-    // --- Viewport State ---
+    // --- State Management ---
     let scale = 1.0;
     let translateX = window.innerWidth / 2;
     let translateY = window.innerHeight / 2;
     
-    // --- Interaction State ---
+    // Tracking multiple pointers for pinch-to-zoom
+    let evCache = [];
+    let prevDiff = -1;
     let isDragging = false;
     let lastX, lastY;
-    let lastTouchDistance = 0; // For pinch-to-zoom
+    
+    // To distinguish click from drag
+    let dragDistance = 0;
+    const DRAG_THRESHOLD = 10; // Pixels
 
     function updateCamera() {
         camera.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
@@ -22,78 +27,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     updateCamera();
 
-    // --- MOUSE EVENTS ---
-    viewport.onwheel = (e) => {
-        e.preventDefault();
-        const zoomSpeed = 0.0015;
-        const deltaScale = -e.deltaY * zoomSpeed;
-        zoomAt(e.clientX, e.clientY, deltaScale);
-    };
-
-    viewport.onmousedown = (e) => {
-        if (e.button === 0) {
-            isDragging = true;
-            lastX = e.clientX;
-            lastY = e.clientY;
-        }
-    };
-
-    window.onmousemove = (e) => {
-        if (isDragging) {
-            translateX += e.clientX - lastX;
-            translateY += e.clientY - lastY;
-            lastX = e.clientX;
-            lastY = e.clientY;
-            updateCamera();
-        }
-    };
-
-    window.onmouseup = () => { isDragging = false; };
-
-    // --- TOUCH EVENTS (FOR IPHONE) ---
-    viewport.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 1) {
-            isDragging = true;
-            lastX = e.touches[0].clientX;
-            lastY = e.touches[0].clientY;
-        } else if (e.touches.length === 2) {
-            // Start pinch-to-zoom
-            lastTouchDistance = getDistance(e.touches[0], e.touches[1]);
-        }
-    }, { passive: false });
-
-    viewport.addEventListener('touchmove', (e) => {
-        e.preventDefault(); // Prevent page scroll/refresh
-        
-        if (e.touches.length === 1 && isDragging) {
-            // One finger: PAN
-            translateX += e.touches[0].clientX - lastX;
-            translateY += e.touches[0].clientY - lastY;
-            lastX = e.touches[0].clientX;
-            lastY = e.touches[0].clientY;
-            updateCamera();
-        } else if (e.touches.length === 2) {
-            // Two fingers: PINCH ZOOM
-            const newDistance = getDistance(e.touches[0], e.touches[1]);
-            const deltaDist = newDistance - lastTouchDistance;
-            
-            // Zoom at the midpoint between fingers
-            const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-            const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-            
-            const zoomAmount = deltaDist * 0.005; // Sensitivity
-            zoomAt(midX, midY, zoomAmount);
-            
-            lastTouchDistance = newDistance;
-        }
-    }, { passive: false });
-
-    viewport.addEventListener('touchend', () => {
-        isDragging = false;
-        lastTouchDistance = 0;
-    });
-
-    // Helper: Zoom calculation
+    // Helper: Zoom at specific screen point
     function zoomAt(x, y, delta) {
         const oldScale = scale;
         scale = Math.min(Math.max(0.1, scale + delta), 5);
@@ -106,26 +40,75 @@ window.addEventListener('DOMContentLoaded', () => {
         updateCamera();
     }
 
-    // Helper: Distance between two points
-    function getDistance(p1, p2) {
-        return Math.hypot(p1.clientX - p2.clientX, p1.clientY - p2.clientY);
-    }
+    // --- Unified Pointer Events ---
+    viewport.onpointerdown = (e) => {
+        evCache.push(e);
+        if (evCache.length === 1) {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            dragDistance = 0;
+        }
+    };
+
+    viewport.onpointermove = (e) => {
+        // Find this pointer in the cache and update its data
+        const index = evCache.findIndex(ev => ev.pointerId === e.pointerId);
+        if (index !== -1) evCache[index] = e;
+
+        if (evCache.length === 1 && isDragging) {
+            // SINGLE POINTER: PAN
+            const dx = e.clientX - lastX;
+            const dy = e.clientY - lastY;
+            translateX += dx;
+            translateY += dy;
+            lastX = e.clientX;
+            lastY = e.clientY;
+            dragDistance += Math.hypot(dx, dy);
+            updateCamera();
+        } else if (evCache.length === 2) {
+            // MULTI POINTER: PINCH ZOOM
+            const curDiff = Math.hypot(evCache[0].clientX - evCache[1].clientX, evCache[0].clientY - evCache[1].clientY);
+            
+            if (prevDiff > 0) {
+                const midX = (evCache[0].clientX + evCache[1].clientX) / 2;
+                const midY = (evCache[0].clientY + evCache[1].clientY) / 2;
+                const zoomAmount = (curDiff - prevDiff) * 0.005;
+                zoomAt(midX, midY, zoomAmount);
+            }
+            prevDiff = curDiff;
+        }
+    };
+
+    viewport.onpointerup = viewport.onpointercancel = viewport.onpointerout = viewport.onpointerleave = (e) => {
+        // Remove from cache
+        const index = evCache.findIndex(ev => ev.pointerId === e.pointerId);
+        if (index !== -1) evCache.splice(index, 1);
+        
+        if (evCache.length < 2) {
+            prevDiff = -1;
+        }
+        if (evCache.length === 0) {
+            isDragging = false;
+        }
+    };
+
+    // Wheel support for desktop
+    viewport.onwheel = (e) => {
+        e.preventDefault();
+        zoomAt(e.clientX, e.clientY, -e.deltaY * 0.0015);
+    };
 
     // --- Graph Logic ---
     const nodeDataMap = {
         'root': [{ label: '[MUSIC]', type: 'music', content: 'Sonic exploration and temporal structures.' }],
         'music': [{ label: '[GRAVITY_2_PROJECT]', type: 'project', content: 'Video extension of musical concepts.', video: 'gravity_2.mp4' }],
         'project': [
-            { label: '[REPETITION]', type: 'keyword' },
-            { label: '[ENDURANCE]', type: 'keyword' },
-            { label: '[RESILIENCE]', type: 'keyword' },
-            { label: '[AUTHOR]', type: 'keyword' },
-            { label: '[INSTRUCTIONS]', type: 'keyword' },
-            { label: '[COLLECTIVE]', type: 'keyword' },
-            { label: '[DECONSTRUCTION]', type: 'keyword' },
-            { label: '[RECONSTRUCTION]', type: 'keyword' },
-            { label: '[DATABASE]', type: 'keyword' },
-            { label: '[WEB_VIEW]', type: 'link', url: 'https://thesis-webmv.vercel.app/' }
+            { label: '[REPETITION]', type: 'keyword' }, { label: '[ENDURANCE]', type: 'keyword' },
+            { label: '[RESILIENCE]', type: 'keyword' }, { label: '[AUTHOR]', type: 'keyword' },
+            { label: '[INSTRUCTIONS]', type: 'keyword' }, { label: '[COLLECTIVE]', type: 'keyword' },
+            { label: '[DECONSTRUCTION]', type: 'keyword' }, { label: '[RECONSTRUCTION]', type: 'keyword' },
+            { label: '[DATABASE]', type: 'keyword' }, { label: '[WEB_VIEW]', type: 'link', url: 'https://thesis-webmv.vercel.app/' }
         ]
     };
 
@@ -160,9 +143,12 @@ window.addEventListener('DOMContentLoaded', () => {
         newNode._line = line; newNode._children = [];
         parentNode._children.push(newNode);
 
-        newNode.onclick = (e) => {
-            e.stopPropagation();
-            toggleNode(newNode, data.type);
+        // Click handler with drag protection
+        newNode.onpointerup = (e) => {
+            if (dragDistance < DRAG_THRESHOLD) {
+                e.stopPropagation();
+                toggleNode(newNode, data.type);
+            }
         };
 
         const contentText = data.content || `SYSLOG: ${Math.random().toString(16).slice(2, 8).toUpperCase()}`;
@@ -209,9 +195,11 @@ window.addEventListener('DOMContentLoaded', () => {
         root.style.left = "0px";
         root.style.top = "0px";
         root._children = [];
-        root.onclick = (e) => {
-            e.stopPropagation();
-            toggleNode(root, 'root');
+        root.onpointerup = (e) => {
+            if (dragDistance < DRAG_THRESHOLD) {
+                e.stopPropagation();
+                toggleNode(root, 'root');
+            }
         };
     }
 });
