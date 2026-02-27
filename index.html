@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>thesis_project_practice</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="scanlines"></div>
+    
+    <!-- Infinite Canvas Viewport -->
+    <div id="viewport">
+        <div id="camera">
+            <svg id="svg-canvas"></svg>
+            <div id="graph-container">
+                <!-- Root node to start the network -->
+                <div class="node" id="root" data-type="root" style="left: 0px; top: 0px;">
+                    <div class="node-label">[THESIS_CORE]</div>
+                    <div class="node-content">System initialized. Click to expand.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="ui-overlay">
+        <div class="title">thesis_project_practice</div>
+        <div class="status">DRAG: Pan | SCROLL: Zoom | CLICK: Toggle Node</div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
